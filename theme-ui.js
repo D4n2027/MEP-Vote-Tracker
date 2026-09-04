@@ -11,25 +11,19 @@
     const inner = document.querySelector('header .inner');
     if (!inner) return;
 
+    inner.querySelectorAll('.header-kicker,.hero-badges').forEach(el => el.remove());
+
     const title = inner.querySelector('h1');
     const subtitle = inner.querySelector('p');
 
-    if (title && !inner.querySelector('.header-kicker')) {
-      const kicker = document.createElement('div');
-      kicker.className = 'header-kicker';
-      kicker.textContent = 'EU policy intelligence';
-      inner.insertBefore(kicker, title);
+    if (title && !inner.querySelector('.brand-rule')) {
+      const rule = document.createElement('div');
+      rule.className = 'brand-rule';
+      inner.insertBefore(rule, title);
     }
 
-    if (subtitle && !inner.querySelector('.hero-badges')) {
-      const badges = document.createElement('div');
-      badges.className = 'hero-badges';
-      badges.innerHTML = `
-        <span class="hero-badge live">Live parliamentary data</span>
-        <span class="hero-badge">Irish MEP focus</span>
-        <span class="hero-badge">Roll-call analysis</span>
-      `;
-      subtitle.insertAdjacentElement('afterend', badges);
+    if (subtitle) {
+      subtitle.textContent = 'European Parliament voting, committee and MEP intelligence for business.';
     }
   }
 
