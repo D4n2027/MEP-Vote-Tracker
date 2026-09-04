@@ -15,5 +15,6 @@
 
   loadScript('/policy-core.js', () => {
     loadScript('/profiles.js');
+    loadScript('/party-ui.js');
   });
 })();
