@@ -45,6 +45,31 @@ const GROUP_NAMES = {
   NI: "Non-attached"
 };
 
+const PARTY_BY_MEP = {
+  "Aodhán Ó Ríordáin": "Labour Party",
+  "Barry Andrews": "Fianna Fáil",
+  "Barry Cowen": "Fianna Fáil",
+  "Billy Kelleher": "Fianna Fáil",
+  "Ciarán Mullooly": "Independent Ireland",
+  "Cynthia Ní Mhurchú": "Fianna Fáil",
+  "Kathleen Funchion": "Sinn Féin",
+  "Luke Ming Flanagan": "Independent",
+  "Lynn Boylan": "Sinn Féin",
+  "Maria Walsh": "Fine Gael",
+  "Michael McNamara": "Independent",
+  "Nina Carberry": "Fine Gael",
+  "Regina Doherty": "Fine Gael",
+  "Seán Kelly": "Fine Gael"
+};
+
+const PARTY_LOGOS = {
+  "Fianna Fáil": "https://commons.wikimedia.org/wiki/Special:FilePath/Fianna%20F%C3%A1il%20logo%20(2024).svg",
+  "Fine Gael": "https://commons.wikimedia.org/wiki/Special:FilePath/Fine%20Gael%20wordmark%202009.svg",
+  "Sinn Féin": "https://commons.wikimedia.org/wiki/Special:FilePath/Sinn%20F%C3%A9in%20wordmark.svg",
+  "Labour Party": "https://commons.wikimedia.org/wiki/Special:FilePath/The%20logo%20of%20Labour%20Party%20in%20Ireland%202021.svg",
+  "Independent Ireland": "https://www.independentireland.ie/favicon.ico"
+};
+
 function text(value) {
   if (value == null) return "";
   if (typeof value === "string" || typeof value === "number") return String(value);
@@ -137,19 +162,16 @@ function groupLabel(value) {
 
 function corporateBodyMeta(raw) {
   const id = lastCode(raw?.body_id ?? raw?.identifier ?? raw?.id ?? raw?.["@id"]);
-
   const notation = text(raw?.notation ?? raw?.["skos:notation"]);
   const label = text(raw?.label);
   const rawCode = notation || label || id;
   const code = lastCode(rawCode).toUpperCase();
-
   const fullName = text(
     raw?.prefLabel ??
     raw?.["skos:prefLabel"] ??
     raw?.altLabel ??
     raw?.["skos:altLabel"]
   );
-
   return {
     id,
     code,
@@ -159,37 +181,28 @@ function corporateBodyMeta(raw) {
 
 function buildCorporateBodyDirectory(pages) {
   const directory = new Map();
-
   for (const raw of pages.flatMap(arrayFrom)) {
     const meta = corporateBodyMeta(raw);
     if (!meta.id && !meta.code) continue;
-
     if (meta.id) directory.set(meta.id.toUpperCase(), meta);
     if (meta.code) directory.set(meta.code.toUpperCase(), meta);
   }
-
   return directory;
 }
 
 function committeesFromDetail(raw, bodyDirectory) {
   const memberships = Array.isArray(raw?.hasMembership) ? raw.hasMembership : [];
   const found = [];
-
   for (const m of memberships) {
     if (!isCurrentMembership(m)) continue;
-
     const classification = lastCode(m?.membershipClassification).toUpperCase();
     if (!classification.startsWith("COMMITTEE_PARLIAMENTARY")) continue;
-
     const orgId = lastCode(m?.organization);
     if (!orgId) continue;
-
     const directoryEntry = bodyDirectory.get(orgId.toUpperCase());
     const directCode = orgId.toUpperCase();
-
     const code = directoryEntry?.code || (COMMITTEE_NAMES[directCode] ? directCode : "");
     const name = directoryEntry?.name || COMMITTEE_NAMES[directCode] || "Committee name unavailable";
-
     found.push({
       key: directoryEntry?.id || orgId,
       code,
@@ -197,22 +210,43 @@ function committeesFromDetail(raw, bodyDirectory) {
       role: roleLabel(m?.role)
     });
   }
-
   const unique = new Map();
   for (const c of found) {
     const old = unique.get(c.key);
     if (!old || (old.role === "Member" && c.role !== "Member")) unique.set(c.key, c);
   }
-
   return [...unique.values()]
     .map(({ key, ...c }) => c)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function normaliseParty(value, code = "") {
+  const raw = `${value || ""} ${code || ""}`.toLowerCase();
+  if (raw.includes("fianna") || /\bff\b/.test(raw)) return "Fianna Fáil";
+  if (raw.includes("fine gael") || /\bfg\b/.test(raw)) return "Fine Gael";
+  if (raw.includes("sinn") || /\bsf\b/.test(raw)) return "Sinn Féin";
+  if (raw.includes("labour") || /\blab\b/.test(raw)) return "Labour Party";
+  if (raw.includes("independent ireland")) return "Independent Ireland";
+  if (raw.includes("independent") || raw.includes("non-attached")) return "Independent";
+  return value || code || "";
+}
+
+function nationalPartyFromDetail(raw, bodyDirectory, name) {
+  const memberships = Array.isArray(raw?.hasMembership) ? raw.hasMembership : [];
+  for (const m of memberships) {
+    if (!isCurrentMembership(m)) continue;
+    const classification = lastCode(m?.membershipClassification).toUpperCase();
+    if (classification !== "NATIONAL_POLITICAL_GROUP") continue;
+    const orgId = lastCode(m?.organization);
+    const meta = bodyDirectory.get(orgId.toUpperCase());
+    const party = normaliseParty(meta?.name || "", meta?.code || orgId);
+    if (party) return party;
+  }
+  return PARTY_BY_MEP[name] || "Independent";
+}
+
 export default async function handler(req, res) {
   try {
-    // Parliament currently has 720 MEPs. Eight pages of 100 covers the roster.
-    // The current corporate-body directory is under 600 entries; six pages covers it.
     const [mepPages, bodyPages] = await Promise.all([
       Promise.all(
         Array.from({ length: 8 }, (_, i) =>
@@ -232,7 +266,6 @@ export default async function handler(req, res) {
     const meps = await Promise.all(roster.map(async raw => {
       const id = mepId(raw);
       let detail = raw;
-
       if (id) {
         try {
           const d = await epJson(`meps/${encodeURIComponent(id)}?format=application%2Fld%2Bjson`);
@@ -248,9 +281,14 @@ export default async function handler(req, res) {
         detail?.political_group ??
         raw?.["api:political-group"];
 
+      const name = mepName(detail) || mepName(raw);
+      const partyName = nationalPartyFromDetail(detail, bodyDirectory, name);
+
       return {
         id,
-        name: mepName(detail) || mepName(raw),
+        name,
+        partyName,
+        partyLogo: PARTY_LOGOS[partyName] || "",
         group: groupLabel(groupRaw) || "Political group unavailable",
         photo: text(detail?.img ?? raw?.img),
         committees: committeesFromDetail(detail, bodyDirectory),
@@ -259,7 +297,6 @@ export default async function handler(req, res) {
     }));
 
     meps.sort((a, b) => a.name.localeCompare(b.name));
-
     res.setHeader("Cache-Control", "s-maxage=21600, stale-while-revalidate=86400");
     return res.status(200).json({ updatedAt: new Date().toISOString(), meps });
   } catch (error) {
