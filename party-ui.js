@@ -2,16 +2,25 @@
   let roster = null;
   let loading = null;
 
+  const GROUP_LOGOS = {
+    'EPP': 'https://commons.wikimedia.org/wiki/Special:FilePath/EPP%20EP%20group%20logo%202015.svg',
+    'Renew Europe': 'https://commons.wikimedia.org/wiki/Special:FilePath/Logo%20of%20Renew%20Europe.svg',
+    'S&D': 'https://commons.wikimedia.org/wiki/Special:FilePath/S%26D.svg',
+    'Greens/EFA': 'https://commons.wikimedia.org/wiki/Special:FilePath/GreensEFA%20logo-en.svg',
+    'The Left': 'https://commons.wikimedia.org/wiki/Special:FilePath/Logo%20of%20The%20Left%20in%20the%20European%20Parliament.svg',
+    'ECR': 'https://ecrgroup.eu/fajls/logo4.svg'
+  };
+
   function addStyles() {
     if (document.getElementById('partyUiStyles')) return;
     const style = document.createElement('style');
     style.id = 'partyUiStyles';
     style.textContent = `
-      .party-mark{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid #e4e7ec;border-radius:7px;background:#fff;overflow:hidden;vertical-align:middle;flex:0 0 auto;margin-right:8px}
-      .party-mark img{display:block;max-width:26px;max-height:24px;object-fit:contain}
-      .party-mark.party-small{width:24px;height:24px;border-radius:6px;margin-right:6px}.party-mark.party-small img{max-width:21px;max-height:19px}
+      .party-mark{display:inline-flex;align-items:center;justify-content:center;width:34px;height:30px;border:1px solid #e4e7ec;border-radius:7px;background:#fff;overflow:hidden;vertical-align:middle;flex:0 0 auto;margin-right:8px;padding:2px}
+      .party-mark img{display:block;max-width:29px;max-height:24px;object-fit:contain}
+      .party-mark.party-small{width:26px;height:24px;border-radius:6px;margin-right:6px;padding:2px}.party-mark.party-small img{max-width:22px;max-height:18px}
       .party-fallback{font-size:9px;font-weight:800;letter-spacing:.2px;color:#344054;background:#f2f4f7}
-      .party-name{font-size:12px;color:#475467;margin-top:3px;display:flex;align-items:center;gap:4px}
+      .european-group-name{font-size:12px;color:#475467;margin-top:3px}
       .party-heading{display:inline-flex;align-items:center}
       .mep-card h3{display:flex;align-items:center}
       .analysis-table td:first-child strong,.coverage-table td:first-child strong,.comparison-row strong{display:flex;align-items:center}
@@ -23,7 +32,7 @@
     if (roster) return roster;
     if (loading) return loading;
     loading = fetch('/api/irish-meps').then(r => {
-      if (!r.ok) throw new Error('Unable to load party data');
+      if (!r.ok) throw new Error('Unable to load European group data');
       return r.json();
     }).then(data => {
       const meps = Array.isArray(data.meps) ? data.meps : [];
@@ -33,30 +42,35 @@
     return loading;
   }
 
-  function fallbackText(party) {
-    if (party === 'Independent') return 'IND';
-    if (party === 'Independent Ireland') return 'II';
-    return String(party || '?').split(/\s+/).filter(Boolean).map(x => x[0]).join('').slice(0,3).toUpperCase();
+  function fallbackText(group) {
+    if (group === 'Non-attached') return 'NI';
+    if (group === 'Renew Europe') return 'RE';
+    if (group === 'The Left') return 'LEFT';
+    if (group === 'Greens/EFA') return 'G/EFA';
+    return String(group || '?').replace(/[^A-Za-z&]/g,'').slice(0,5).toUpperCase();
   }
 
   function makeMark(mep, small = false) {
+    const group = mep.group || 'European political group';
+    const logo = GROUP_LOGOS[group];
     const span = document.createElement('span');
     span.className = 'party-mark' + (small ? ' party-small' : '');
-    span.title = mep.partyName || 'National party';
-    if (mep.partyLogo) {
+    span.title = group;
+
+    if (logo) {
       const img = document.createElement('img');
-      img.src = mep.partyLogo;
-      img.alt = mep.partyName || 'Party logo';
+      img.src = logo;
+      img.alt = group + ' logo';
       img.loading = 'lazy';
       img.referrerPolicy = 'no-referrer';
       img.onerror = () => {
         span.classList.add('party-fallback');
-        span.textContent = fallbackText(mep.partyName);
+        span.textContent = fallbackText(group);
       };
       span.appendChild(img);
     } else {
       span.classList.add('party-fallback');
-      span.textContent = fallbackText(mep.partyName);
+      span.textContent = fallbackText(group);
     }
     return span;
   }
@@ -78,13 +92,10 @@
       if (!mep) return;
       heading.prepend(makeMark(mep));
       heading.dataset.partyDecorated = 'true';
-      const group = card.querySelector('.mep-group');
-      if (group && !card.querySelector('.party-name')) {
-        const party = document.createElement('div');
-        party.className = 'party-name';
-        party.textContent = mep.partyName || 'National party unavailable';
-        group.insertAdjacentElement('afterend', party);
-      }
+
+      // The existing line already shows the European Parliament group.
+      // Remove the old national-party line if it was added by an earlier render.
+      card.querySelectorAll('.party-name').forEach(el => el.remove());
     });
   }
 
@@ -119,7 +130,7 @@
       decorateIrishCards(meps);
       decorateAnalysisNames(meps);
     } catch (error) {
-      console.warn('Party logo decoration unavailable', error);
+      console.warn('European group logo decoration unavailable', error);
     }
   }
 
