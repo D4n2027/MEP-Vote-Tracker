@@ -20,10 +20,13 @@
       .party-mark img{display:block;max-width:29px;max-height:24px;object-fit:contain}
       .party-mark.party-small{width:26px;height:24px;border-radius:6px;margin-right:6px;padding:2px}.party-mark.party-small img{max-width:22px;max-height:18px}
       .party-fallback{font-size:9px;font-weight:800;letter-spacing:.2px;color:#344054;background:#f2f4f7}
-      .european-group-name{font-size:12px;color:#475467;margin-top:3px}
+      .national-party-name{font-size:12px;color:#667085;margin-top:2px;line-height:1.3}
+      .national-party-name::before{content:'Irish party: ';font-weight:700;color:#475467}
       .party-heading{display:inline-flex;align-items:center}
       .mep-card h3{display:flex;align-items:center}
       .analysis-table td:first-child strong,.coverage-table td:first-child strong,.comparison-row strong{display:flex;align-items:center}
+      .analysis-table td:first-child .national-party-name,.coverage-table td:first-child .national-party-name{margin-left:32px}
+      .comparison-row .national-party-name{grid-column:1/2;margin-left:32px;margin-top:-4px}
     `;
     document.head.appendChild(style);
   }
@@ -75,6 +78,13 @@
     return span;
   }
 
+  function makeNationalPartyLine(mep) {
+    const div = document.createElement('div');
+    div.className = 'national-party-name';
+    div.textContent = mep.partyName || 'Unavailable';
+    return div;
+  }
+
   function normaliseName(value) {
     return String(value || '').replace(/\s+/g,' ').trim();
   }
@@ -87,15 +97,19 @@
   function decorateIrishCards(meps) {
     document.querySelectorAll('.mep-card').forEach(card => {
       const heading = card.querySelector('h3');
-      if (!heading || heading.dataset.partyDecorated) return;
+      if (!heading) return;
       const mep = findMepByText(meps, heading.textContent);
       if (!mep) return;
-      heading.prepend(makeMark(mep));
-      heading.dataset.partyDecorated = 'true';
 
-      // The existing line already shows the European Parliament group.
-      // Remove the old national-party line if it was added by an earlier render.
-      card.querySelectorAll('.party-name').forEach(el => el.remove());
+      if (!heading.dataset.partyDecorated) {
+        heading.prepend(makeMark(mep));
+        heading.dataset.partyDecorated = 'true';
+      }
+
+      const group = card.querySelector('.mep-group');
+      if (group && !card.querySelector('.national-party-name')) {
+        group.insertAdjacentElement('afterend', makeNationalPartyLine(mep));
+      }
     });
   }
 
@@ -106,21 +120,38 @@
       '.comparison-row strong',
       '.profile-vote strong'
     ];
+
     document.querySelectorAll(selectors.join(',')).forEach(el => {
-      if (el.dataset.partyDecorated) return;
       const mep = findMepByText(meps, el.textContent);
       if (!mep) return;
-      el.prepend(makeMark(mep, true));
-      el.dataset.partyDecorated = 'true';
+
+      if (!el.dataset.partyDecorated) {
+        el.prepend(makeMark(mep, true));
+        el.dataset.partyDecorated = 'true';
+      }
+
+      const container = el.closest('td') || el.closest('.comparison-row') || el.parentElement;
+      if (container && !container.querySelector('.national-party-name')) {
+        el.insertAdjacentElement('afterend', makeNationalPartyLine(mep));
+      }
     });
 
     document.querySelectorAll('#mepProfilePanel h3').forEach(el => {
-      if (el.dataset.partyDecorated) return;
       const mep = findMepByText(meps, el.textContent);
       if (!mep) return;
-      el.prepend(makeMark(mep));
-      el.classList.add('party-heading');
-      el.dataset.partyDecorated = 'true';
+
+      if (!el.dataset.partyDecorated) {
+        el.prepend(makeMark(mep));
+        el.classList.add('party-heading');
+        el.dataset.partyDecorated = 'true';
+      }
+
+      const headingWrap = el.parentElement;
+      if (headingWrap && !headingWrap.querySelector('.national-party-name')) {
+        const existingMeta = headingWrap.querySelector('.small-meta');
+        if (existingMeta) existingMeta.insertAdjacentElement('afterend', makeNationalPartyLine(mep));
+        else el.insertAdjacentElement('afterend', makeNationalPartyLine(mep));
+      }
     });
   }
 
