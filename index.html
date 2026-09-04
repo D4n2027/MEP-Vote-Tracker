@@ -69,7 +69,55 @@
     .loader { padding: 25px; text-align: center; color: #667085; }
     .error { border-left: 4px solid #b42318; }
     a { color: #003399; }
+
+    .mep-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .mep-card { margin: 0; }
+    .mep-head {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .mep-photo {
+      width: 64px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 50%;
+      background: #eef2f6;
+      flex: 0 0 auto;
+    }
+    .mep-card h3 { margin: 0 0 4px; }
+    .mep-group { color: #667085; font-size: 14px; }
+    .committee-list { display: flex; flex-direction: column; gap: 8px; }
+    .committee-row {
+      background: #f8fafc;
+      border: 1px solid #e4e7ec;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    .committee-code {
+      display: inline-block;
+      font-weight: 700;
+      color: #003399;
+      margin-right: 6px;
+    }
+    .committee-role {
+      display: inline-block;
+      margin-left: 6px;
+      color: #667085;
+      font-size: 12px;
+    }
+
     footer { padding: 20px; margin-top: 40px; color: #667085; font-size: 13px; }
+    @media (max-width: 760px) {
+      .mep-grid { grid-template-columns: 1fr; }
+    }
     @media (max-width: 650px) {
       .search { flex-direction: column; }
       header h1 { font-size: 28px; }
@@ -87,12 +135,13 @@
 <main>
   <div class="intro">
     <h2>European Parliament intelligence</h2>
-    <p>Use this tool to identify upcoming parliamentary activity and explore previous roll-call votes.</p>
+    <p>Use this tool to identify upcoming parliamentary activity, explore previous roll-call votes and see where Irish MEPs sit across Parliament’s committees.</p>
   </div>
 
   <div class="tabs">
     <button class="tab active" onclick="showTab('upcoming', this)">Upcoming Watch</button>
     <button class="tab" onclick="showTab('historic', this)">Historic Votes</button>
+    <button class="tab" onclick="showTab('irish', this)">Irish MEPs &amp; Committees</button>
   </div>
 
   <section id="upcoming" class="section active">
@@ -113,6 +162,15 @@
     </div>
     <div id="voteResults"></div>
   </section>
+
+  <section id="irish" class="section">
+    <h2>Irish MEPs and committee memberships</h2>
+    <p>Current Irish Members of the European Parliament and their active committee roles, taken from European Parliament open data.</p>
+    <button class="primary" onclick="loadIrishMEPs(true)">Refresh Irish MEPs</button>
+    <div id="irishResults">
+      <div class="loader">Open this tab to load the current Irish MEP list.</div>
+    </div>
+  </section>
 </main>
 
 <footer>
@@ -120,11 +178,14 @@
 </footer>
 
 <script>
+  let irishLoaded = false;
+
   function showTab(id, button) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     button.classList.add('active');
+    if (id === 'irish' && !irishLoaded) loadIrishMEPs();
   }
 
   async function searchVotes() {
@@ -173,6 +234,71 @@
         <div class="card error">
           <strong>Unable to retrieve votes.</strong>
           <p>The vote data service could not be reached. Please try again shortly.</p>
+        </div>`;
+    }
+  }
+
+  async function loadIrishMEPs(force = false) {
+    if (irishLoaded && !force) return;
+
+    const results = document.getElementById('irishResults');
+    results.innerHTML = '<div class="loader">Loading Irish MEPs and committee memberships...</div>';
+
+    try {
+      const response = await fetch('/api/irish-meps');
+      if (!response.ok) throw new Error('Irish MEP request failed: ' + response.status);
+
+      const data = await response.json();
+      const meps = Array.isArray(data.meps) ? data.meps : [];
+
+      if (!meps.length) {
+        results.innerHTML = '<div class="card"><strong>No Irish MEPs were returned by the Parliament data feed.</strong></div>';
+        return;
+      }
+
+      irishLoaded = true;
+
+      results.innerHTML = `
+        <div class="meta" style="margin:14px 0;">${meps.length} current Irish MEPs · data refreshed ${new Date(data.updatedAt).toLocaleString('en-IE')}</div>
+        <div class="mep-grid">
+          ${meps.map(mep => {
+            const committees = Array.isArray(mep.committees) ? mep.committees : [];
+            const photo = mep.photo
+              ? `<img class="mep-photo" src="${escapeAttribute(mep.photo)}" alt="">`
+              : `<div class="mep-photo"></div>`;
+
+            return `
+              <div class="card mep-card">
+                <div class="mep-head">
+                  ${photo}
+                  <div>
+                    <h3>${escapeHTML(mep.name || 'Unknown MEP')}</h3>
+                    <div class="mep-group">${escapeHTML(mep.group || '')}</div>
+                  </div>
+                </div>
+
+                <div class="committee-list">
+                  ${committees.length
+                    ? committees.map(c => `
+                        <div class="committee-row">
+                          <span class="committee-code">${escapeHTML(c.code)}</span>
+                          ${escapeHTML(c.name)}
+                          ${c.role ? `<span class="committee-role">${escapeHTML(c.role)}</span>` : ''}
+                        </div>`).join('')
+                    : '<div class="meta">No current committee memberships returned.</div>'}
+                </div>
+
+                ${mep.profileUrl ? `<p style="margin-bottom:0;margin-top:14px;"><a href="${escapeAttribute(mep.profileUrl)}" target="_blank" rel="noopener">European Parliament profile →</a></p>` : ''}
+              </div>`;
+          }).join('')}
+        </div>`;
+    } catch (error) {
+      console.error(error);
+      irishLoaded = false;
+      results.innerHTML = `
+        <div class="card error">
+          <strong>Unable to retrieve Irish MEP committee data.</strong>
+          <p>Please try the refresh button again shortly.</p>
         </div>`;
     }
   }
@@ -351,6 +477,10 @@
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  function escapeAttribute(value) {
+    return escapeHTML(value);
   }
 </script>
 </body>
