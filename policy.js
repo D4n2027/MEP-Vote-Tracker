@@ -13,8 +13,10 @@
     document.body.appendChild(script);
   }
 
-  loadScript('/policy-core.js', () => {
-    loadScript('/profiles.js');
-    loadScript('/party-ui.js');
+  loadScript('/theme-ui.js', () => {
+    loadScript('/policy-core.js', () => {
+      loadScript('/profiles.js');
+      loadScript('/party-ui.js');
+    });
   });
 })();
