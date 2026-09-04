@@ -42,6 +42,11 @@
     }
     .tab { background: #e9eef8; color: #003399; }
     .tab.active, .primary { background: #003399; color: white; }
+    .secondary {
+      background: #e9eef8;
+      color: #003399;
+      border: 1px solid #cbd5e1;
+    }
     .section { display: none; }
     .section.active { display: block; }
     .search { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -75,6 +80,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
       margin-top: 18px;
+      align-items: start;
     }
     .mep-card { margin: 0; }
     .mep-head {
@@ -113,13 +119,68 @@
       color: #667085;
       font-size: 12px;
     }
+    .mep-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+      align-items: center;
+    }
+
+    .vote-history {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e4e7ec;
+    }
+    .vote-filter {
+      display: flex;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .vote-filter input { padding: 10px 12px; }
+    .vote-filter button { padding: 10px 14px; }
+    .vote-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .summary-box {
+      background: #f8fafc;
+      border: 1px solid #e4e7ec;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .summary-number { display: block; font-size: 20px; font-weight: 700; }
+    .summary-label { color: #667085; font-size: 11px; }
+    .vote-list { margin-top: 10px; }
+    .vote-row {
+      border-top: 1px solid #e4e7ec;
+      padding: 12px 0;
+    }
+    .vote-row:first-child { border-top: 0; }
+    .vote-row-title { font-weight: 700; margin: 5px 0; line-height: 1.35; }
+    .vote-position {
+      display: inline-block;
+      border-radius: 5px;
+      padding: 4px 7px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .position-for { background: #ecfdf3; color: #027a48; }
+    .position-against { background: #fee4e2; color: #b42318; }
+    .position-abstention { background: #fef0c7; color: #b54708; }
+    .position-did-not-vote { background: #f2f4f7; color: #475467; }
+    .position-other { background: #eef2ff; color: #3730a3; }
 
     footer { padding: 20px; margin-top: 40px; color: #667085; font-size: 13px; }
     @media (max-width: 760px) {
       .mep-grid { grid-template-columns: 1fr; }
+      .vote-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 650px) {
-      .search { flex-direction: column; }
+      .search, .vote-filter { flex-direction: column; }
       header h1 { font-size: 28px; }
     }
   </style>
@@ -135,7 +196,7 @@
 <main>
   <div class="intro">
     <h2>European Parliament intelligence</h2>
-    <p>Use this tool to identify upcoming parliamentary activity, explore previous roll-call votes and see where Irish MEPs sit across Parliament’s committees.</p>
+    <p>Use this tool to identify upcoming parliamentary activity, explore previous roll-call votes and see where Irish MEPs sit across Parliament’s committees and how they have voted.</p>
   </div>
 
   <div class="tabs">
@@ -165,7 +226,7 @@
 
   <section id="irish" class="section">
     <h2>Irish MEPs and committee memberships</h2>
-    <p>Current Irish Members of the European Parliament and their active committee roles, taken from European Parliament open data.</p>
+    <p>Current Irish Members of the European Parliament, their active committee roles and their recorded roll-call voting history.</p>
     <button class="primary" onclick="loadIrishMEPs(true)">Refresh Irish MEPs</button>
     <div id="irishResults">
       <div class="loader">Open this tab to load the current Irish MEP list.</div>
@@ -263,6 +324,7 @@
         <div class="mep-grid">
           ${meps.map(mep => {
             const committees = Array.isArray(mep.committees) ? mep.committees : [];
+            const id = String(mep.id || '').replace(/\D/g, '');
             const photo = mep.photo
               ? `<img class="mep-photo" src="${escapeAttribute(mep.photo)}" alt="">`
               : `<div class="mep-photo"></div>`;
@@ -288,7 +350,12 @@
                     : '<div class="meta">No current committee memberships returned.</div>'}
                 </div>
 
-                ${mep.profileUrl ? `<p style="margin-bottom:0;margin-top:14px;"><a href="${escapeAttribute(mep.profileUrl)}" target="_blank" rel="noopener">European Parliament profile →</a></p>` : ''}
+                <div class="mep-actions">
+                  ${id ? `<button class="secondary" id="history-btn-${id}" onclick="toggleVotingHistory('${id}')">View voting history</button>` : ''}
+                  ${mep.profileUrl ? `<a href="${escapeAttribute(mep.profileUrl)}" target="_blank" rel="noopener">European Parliament profile →</a>` : ''}
+                </div>
+
+                ${id ? `<div id="vote-history-${id}" class="vote-history" hidden></div>` : ''}
               </div>`;
           }).join('')}
         </div>`;
@@ -301,6 +368,122 @@
           <p>Please try the refresh button again shortly.</p>
         </div>`;
     }
+  }
+
+  async function toggleVotingHistory(id) {
+    const panel = document.getElementById('vote-history-' + id);
+    const button = document.getElementById('history-btn-' + id);
+    if (!panel) return;
+
+    if (!panel.hidden) {
+      panel.hidden = true;
+      if (button) button.textContent = 'View voting history';
+      return;
+    }
+
+    panel.hidden = false;
+    if (button) button.textContent = 'Hide voting history';
+
+    if (!panel.dataset.loaded) {
+      await loadMemberVotes(id, '');
+    }
+  }
+
+  async function filterMemberVotes(id) {
+    const input = document.getElementById('vote-filter-' + id);
+    const query = input ? input.value.trim() : '';
+    await loadMemberVotes(id, query);
+  }
+
+  async function loadMemberVotes(id, query = '') {
+    const panel = document.getElementById('vote-history-' + id);
+    if (!panel) return;
+
+    panel.hidden = false;
+    panel.innerHTML = '<div class="loader">Loading recorded roll-call votes...</div>';
+
+    try {
+      const url = '/api/member-votes?id=' + encodeURIComponent(id) + (query ? '&q=' + encodeURIComponent(query) : '');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Member vote request failed: ' + response.status);
+
+      const data = await response.json();
+      const votes = Array.isArray(data.results) ? data.results : [];
+      const counts = countPositions(votes);
+      const total = Number.isFinite(Number(data.total)) ? Number(data.total) : votes.length;
+
+      panel.dataset.loaded = 'true';
+      panel.innerHTML = `
+        <strong>Recorded voting history</strong>
+        <div class="meta" style="margin-top:4px;">Showing ${votes.length} of approximately ${total} matching recorded roll-call votes${query ? ` for “${escapeHTML(query)}”` : ''}.</div>
+
+        <div class="vote-filter">
+          <input id="vote-filter-${id}" value="${escapeAttribute(query)}" placeholder="Filter this MEP's votes, e.g. energy, SMEs, trade" onkeydown="if(event.key==='Enter') filterMemberVotes('${id}')">
+          <button class="primary" onclick="filterMemberVotes('${id}')">Filter</button>
+          ${query ? `<button class="secondary" onclick="loadMemberVotes('${id}', '')">Clear</button>` : ''}
+        </div>
+
+        <div class="vote-summary">
+          <div class="summary-box"><span class="summary-number">${counts.FOR}</span><span class="summary-label">For</span></div>
+          <div class="summary-box"><span class="summary-number">${counts.AGAINST}</span><span class="summary-label">Against</span></div>
+          <div class="summary-box"><span class="summary-number">${counts.ABSTENTION}</span><span class="summary-label">Abstained</span></div>
+          <div class="summary-box"><span class="summary-number">${counts.DID_NOT_VOTE}</span><span class="summary-label">Did not vote</span></div>
+        </div>
+
+        <div class="meta">Summary above is based on the votes currently shown, not the MEP's full lifetime record.</div>
+
+        <div class="vote-list">
+          ${votes.length ? votes.map(renderMemberVote).join('') : '<div class="meta" style="padding:12px 0;">No matching recorded votes found.</div>'}
+        </div>`;
+    } catch (error) {
+      console.error(error);
+      panel.innerHTML = `
+        <div class="error" style="padding:10px 12px;">
+          <strong>Unable to retrieve this MEP's voting history.</strong>
+          <div class="meta" style="margin-top:5px;">Please try again shortly.</div>
+        </div>`;
+    }
+  }
+
+  function renderMemberVote(vote) {
+    const date = vote.timestamp ? new Date(vote.timestamp).toLocaleDateString('en-IE') : 'Date unavailable';
+    const title = vote.display_title || vote.description || 'European Parliament vote';
+    const position = String(vote.position || 'UNKNOWN');
+    const positionInfo = votePositionInfo(position);
+    const committees = Array.isArray(vote.responsible_committees)
+      ? vote.responsible_committees.map(c => c.abbreviation || c.code || c.label || '').filter(Boolean).join(', ')
+      : '';
+    const topics = Array.isArray(vote.topics)
+      ? vote.topics.map(t => t.label || t.code || '').filter(Boolean).slice(0, 3).join(' · ')
+      : '';
+
+    return `
+      <div class="vote-row">
+        <span class="vote-position ${positionInfo.className}">${positionInfo.label}</span>
+        <div class="meta" style="margin-top:6px;">${escapeHTML(date)}${committees ? ' · ' + escapeHTML(committees) : ''}</div>
+        <div class="vote-row-title">${escapeHTML(title)}</div>
+        ${vote.description && vote.description !== title ? `<div class="meta">${escapeHTML(vote.description)}</div>` : ''}
+        ${topics ? `<div class="meta" style="margin-top:4px;">${escapeHTML(topics)}</div>` : ''}
+        <div style="margin-top:6px;"><a href="https://howtheyvote.eu/votes/${encodeURIComponent(vote.id)}" target="_blank" rel="noopener">View vote →</a></div>
+      </div>`;
+  }
+
+  function countPositions(votes) {
+    const counts = { FOR: 0, AGAINST: 0, ABSTENTION: 0, DID_NOT_VOTE: 0 };
+    for (const vote of votes) {
+      const p = String(vote.position || '').toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(counts, p)) counts[p] += 1;
+    }
+    return counts;
+  }
+
+  function votePositionInfo(position) {
+    const p = String(position || '').toUpperCase();
+    if (p === 'FOR') return { label: 'FOR', className: 'position-for' };
+    if (p === 'AGAINST') return { label: 'AGAINST', className: 'position-against' };
+    if (p === 'ABSTENTION') return { label: 'ABSTAINED', className: 'position-abstention' };
+    if (p === 'DID_NOT_VOTE') return { label: 'DID NOT VOTE', className: 'position-did-not-vote' };
+    return { label: p.replaceAll('_', ' ') || 'UNKNOWN', className: 'position-other' };
   }
 
   async function loadUpcoming() {
