@@ -48,9 +48,20 @@ const GROUP_NAMES = {
 function text(value) {
   if (value == null) return "";
   if (typeof value === "string" || typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.length ? text(value[0]) : "";
+  if (Array.isArray(value)) {
+    if (!value.length) return "";
+    const english = value.find(v => v && typeof v === "object" && (v.language === "en" || v.lang === "en" || v["@language"] === "en"));
+    return text(english || value[0]);
+  }
   if (typeof value === "object") {
-    return text(value.en ?? value["@value"] ?? value.value ?? value.label ?? value["@id"] ?? value.id);
+    return text(
+      value.en ??
+      value["@value"] ??
+      value.value ??
+      value.label ??
+      value["@id"] ??
+      value.id
+    );
   }
   return "";
 }
@@ -124,7 +135,43 @@ function groupLabel(value) {
   return GROUP_NAMES[code] || lastCode(value).replaceAll("_", " ").replaceAll("-", " ");
 }
 
-function committeesFromDetail(raw) {
+function corporateBodyMeta(raw) {
+  const id = lastCode(raw?.body_id ?? raw?.identifier ?? raw?.id ?? raw?.["@id"]);
+
+  const notation = text(raw?.notation ?? raw?.["skos:notation"]);
+  const label = text(raw?.label);
+  const rawCode = notation || label || id;
+  const code = lastCode(rawCode).toUpperCase();
+
+  const fullName = text(
+    raw?.prefLabel ??
+    raw?.["skos:prefLabel"] ??
+    raw?.altLabel ??
+    raw?.["skos:altLabel"]
+  );
+
+  return {
+    id,
+    code,
+    name: fullName || COMMITTEE_NAMES[code] || (/[A-Z]/.test(code) ? code : "Committee")
+  };
+}
+
+function buildCorporateBodyDirectory(pages) {
+  const directory = new Map();
+
+  for (const raw of pages.flatMap(arrayFrom)) {
+    const meta = corporateBodyMeta(raw);
+    if (!meta.id && !meta.code) continue;
+
+    if (meta.id) directory.set(meta.id.toUpperCase(), meta);
+    if (meta.code) directory.set(meta.code.toUpperCase(), meta);
+  }
+
+  return directory;
+}
+
+function committeesFromDetail(raw, bodyDirectory) {
   const memberships = Array.isArray(raw?.hasMembership) ? raw.hasMembership : [];
   const found = [];
 
@@ -132,35 +179,55 @@ function committeesFromDetail(raw) {
     if (!isCurrentMembership(m)) continue;
 
     const classification = lastCode(m?.membershipClassification).toUpperCase();
-    const code = lastCode(m?.organization).toUpperCase();
-    const looksLikeCommittee = classification.startsWith("COMMITTEE_PARLIAMENTARY") || Boolean(COMMITTEE_NAMES[code]);
-    if (!looksLikeCommittee || !code) continue;
+    if (!classification.startsWith("COMMITTEE_PARLIAMENTARY")) continue;
+
+    const orgId = lastCode(m?.organization);
+    if (!orgId) continue;
+
+    const directoryEntry = bodyDirectory.get(orgId.toUpperCase());
+    const directCode = orgId.toUpperCase();
+
+    const code = directoryEntry?.code || (COMMITTEE_NAMES[directCode] ? directCode : "");
+    const name = directoryEntry?.name || COMMITTEE_NAMES[directCode] || "Committee name unavailable";
 
     found.push({
+      key: directoryEntry?.id || orgId,
       code,
-      name: COMMITTEE_NAMES[code] || code,
+      name,
       role: roleLabel(m?.role)
     });
   }
 
   const unique = new Map();
   for (const c of found) {
-    const old = unique.get(c.code);
-    if (!old || (old.role === "Member" && c.role !== "Member")) unique.set(c.code, c);
+    const old = unique.get(c.key);
+    if (!old || (old.role === "Member" && c.role !== "Member")) unique.set(c.key, c);
   }
-  return [...unique.values()].sort((a, b) => a.code.localeCompare(b.code));
+
+  return [...unique.values()]
+    .map(({ key, ...c }) => c)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default async function handler(req, res) {
   try {
-    // The Parliament has 720 seats, so 8 pages of 100 covers the complete current roster.
-    const pages = await Promise.all(
-      Array.from({ length: 8 }, (_, i) =>
-        epJson(`meps/show-current?format=application%2Fld%2Bjson&limit=100&offset=${i * 100}`)
+    // Parliament currently has 720 MEPs. Eight pages of 100 covers the roster.
+    // The current corporate-body directory is under 600 entries; six pages covers it.
+    const [mepPages, bodyPages] = await Promise.all([
+      Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          epJson(`meps/show-current?format=application%2Fld%2Bjson&limit=100&offset=${i * 100}`)
+        )
+      ),
+      Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          epJson(`corporate-bodies/show-current?format=application%2Fld%2Bjson&limit=100&offset=${i * 100}`)
+        )
       )
-    );
+    ]);
 
-    const roster = pages.flatMap(arrayFrom).filter(isIrish);
+    const bodyDirectory = buildCorporateBodyDirectory(bodyPages);
+    const roster = mepPages.flatMap(arrayFrom).filter(isIrish);
 
     const meps = await Promise.all(roster.map(async raw => {
       const id = mepId(raw);
@@ -175,14 +242,18 @@ export default async function handler(req, res) {
         }
       }
 
-      const groupRaw = detail?.["api:political-group"] ?? detail?.politicalGroup ?? detail?.political_group ?? raw?.["api:political-group"];
+      const groupRaw =
+        detail?.["api:political-group"] ??
+        detail?.politicalGroup ??
+        detail?.political_group ??
+        raw?.["api:political-group"];
 
       return {
         id,
         name: mepName(detail) || mepName(raw),
         group: groupLabel(groupRaw) || "Political group unavailable",
         photo: text(detail?.img ?? raw?.img),
-        committees: committeesFromDetail(detail),
+        committees: committeesFromDetail(detail, bodyDirectory),
         profileUrl: id ? `https://www.europarl.europa.eu/meps/en/${encodeURIComponent(id)}` : ""
       };
     }));
