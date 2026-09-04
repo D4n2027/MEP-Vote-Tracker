@@ -14,6 +14,7 @@
   }
 
   loadScript('/theme-ui.js', () => {
+    loadScript('/upcoming-briefing.js');
     loadScript('/policy-core.js', () => {
       loadScript('/profiles.js');
       loadScript('/party-ui.js');
